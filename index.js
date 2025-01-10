@@ -72,27 +72,14 @@ if (process.env.TELEGRAM_TOKEN) {
 	Telegram.start((ctx) => ctx.reply('Welcome! Forward me a Voice Message to get an audio transcript.'))
 	Telegram.on(message('voice'), async (ctx) => {
 		console.log("Got Voice message!")
+		ctx.sendChatAction('typing');
 		const transcript = await TGVoiceHandler(ctx.message.voice.file_id);
 		ctx.reply(`Transcript of the voice message:\n${transcript}`, {
 			reply_to_message_id: ctx.message.message_id
+		}).catch((err) => {
+			ctx.reply(`Transcript of the voice message:\n${transcript}`)
 		})
 	});
-	Telegram.command('transcribe', async (ctx) => {
-		// get voice message of message that we replied to
-		const replyToMessage = ctx.message.reply_to_message;
-		if (replyToMessage && replyToMessage.voice) {
-			const file_id = replyToMessage.voice.file_id;
-			const transcript = await TGVoiceHandler(file_id);
-			ctx.reply(`Transcript of the voice message:\n${transcript}`, {
-				reply_to_message_id: ctx.message.message_id
-			})
-		} else {
-			ctx.reply('Please reply to a voice message with /transcribe', {
-				reply_to_message_id: ctx.message.message_id
-			});
-			console.log("not a reply!")
-		}
-	})
 	
 
 	Telegram.launch()
