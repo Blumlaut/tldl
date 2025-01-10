@@ -71,7 +71,6 @@ if (process.env.TELEGRAM_TOKEN) {
 	Telegram = new Telegraf(process.env.TELEGRAM_TOKEN)
 	Telegram.start((ctx) => ctx.reply('Welcome! Forward me a Voice Message to get an audio transcript.'))
 	Telegram.on(message('voice'), async (ctx) => {
-		console.log("Got Voice message!")
 		ctx.sendChatAction('typing');
 		const transcript = await TGVoiceHandler(ctx.message.voice.file_id);
 		ctx.reply(`${transcript}`, {
