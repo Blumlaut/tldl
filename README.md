@@ -8,3 +8,14 @@ Clone the repository and download the latest version of [Whisper-Faster-XXL](htt
 Run `npm i` in bot directory, copy `.env.example` to `.env` and fill out the required environment variables.
 
 Start the bot with `npm start`
+
+
+## Behaviour
+
+The Bot will create an image transcript for every voice message it sees, this can be in a DM, Group or Server.
+
+Voice messages are temporarily downloaded into `/tmp/tldl/`, this is also where transcripts are stored until they are read by the bot, the files are subsequently deleted.
+
+## License
+
+see [LICENSE.md](LICENSE.md]
