@@ -9,7 +9,6 @@ Run `npm i` in bot directory, copy `.env.example` to `.env` and fill out the req
 
 Start the bot with `npm start`
 
-
 ## Behaviour
 
 The Bot will create an audio transcript for every voice message it sees, this can be in a DM, Group or Server.
@@ -19,3 +18,7 @@ Voice messages are temporarily downloaded into `/tmp/tldl/`, this is also where 
 ## License
 
 see [LICENSE](LICENSE)
+
+## Give it a try!
+
+Test the Bot by [inviting it on Discord](https://discord.com/oauth2/authorize?client_id=1327351558777864333) or [messaging it on Telegram](https://t.me/voicetranscriptbot)
