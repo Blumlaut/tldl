@@ -6,7 +6,7 @@ import { message } from 'telegraf/filters';
 import { Client, GatewayIntentBits, Partials } from 'discord.js';
 
 // set up Discord.js with message content intent
-const Discord = new Client({ partials: [Partials.GuildMember, Partials.User, Partials.Message, Partials.Channel], intents: [GatewayIntentBits.Guilds, GatewayIntentBits.DirectMessages, GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
+const Discord = new Client({ partials: [Partials.GuildMember, Partials.User, Partials.Message, Partials.Channel], intents: [GatewayIntentBits.Guilds, GatewayIntentBits.DirectMessages, GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
 if (process.env.DISCORD_TOKEN)  {
 	Discord.login(process.env.DISCORD_TOKEN);
 } else {
