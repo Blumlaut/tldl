@@ -69,11 +69,11 @@ var Telegram
 
 if (process.env.TELEGRAM_TOKEN) {
 	Telegram = new Telegraf(process.env.TELEGRAM_TOKEN)
-	Telegram.start((ctx) => ctx.reply('Welcome! Forward me a Voice Message to get an audio transcription'))
+	Telegram.start((ctx) => ctx.reply('Welcome! Forward me a Voice Message to get an audio transcript.'))
 	Telegram.on(message('voice'), async (ctx) => {
 		console.log("Got Voice message!")
 		const transcript = await TGVoiceHandler(ctx.message.voice.file_id);
-		ctx.reply(`Transcript of the voice message:\n\`\`\`\n${transcript}\`\`\`\n`, {
+		ctx.reply(`Transcript of the voice message:\n${transcript}`, {
 			reply_to_message_id: ctx.message.message_id
 		})
 	});
@@ -83,7 +83,7 @@ if (process.env.TELEGRAM_TOKEN) {
 		if (replyToMessage && replyToMessage.voice) {
 			const file_id = replyToMessage.voice.file_id;
 			const transcript = await TGVoiceHandler(file_id);
-			ctx.reply(`Transcript of the voice message:\n\`\`\`\n${transcript}\`\`\`\n`, {
+			ctx.reply(`Transcript of the voice message:\n${transcript}`, {
 				reply_to_message_id: ctx.message.message_id
 			})
 		} else {
