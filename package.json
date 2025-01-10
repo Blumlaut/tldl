@@ -1,0 +1,32 @@
+{
+  "name": "tldl",
+  "version": "1.0.0",
+  "description": "too long; didn't listen - generate voice message captions with whisper",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node --env-file .env index.js",
+    "run": "node --env-file .env index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/blumlaut/tldl.git"
+  },
+  "keywords": [
+    "whisper",
+    "telegram",
+    "discord"
+  ],
+  "author": "blumlaut",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "bugs": {
+    "url": "https://github.com/blumlaut/tldl/issues"
+  },
+  "homepage": "https://github.com/blumlaut/tldl#readme",
+  "dependencies": {
+    "discord.js": "^14.17.3",
+    "execa": "^9.5.2",
+    "telegraf": "^4.16.3"
+  },
+  "type": "module"
+}
