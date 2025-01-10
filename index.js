@@ -39,7 +39,7 @@ Discord.on('messageCreate', async (message) => {
 	if (attachment && attachment.waveform) {
 		message.channel.sendTyping();
 		const transcript = await DiscordVoiceHandler(attachment.url);
-		message.reply({ content: `Transcript of the voice message:\n\`\`\`\n${transcript}\`\`\`\n` });
+		message.reply({ content: `\`\`\`\n${transcript}\`\`\`\n` });
 	}
 });
 
@@ -74,10 +74,10 @@ if (process.env.TELEGRAM_TOKEN) {
 		console.log("Got Voice message!")
 		ctx.sendChatAction('typing');
 		const transcript = await TGVoiceHandler(ctx.message.voice.file_id);
-		ctx.reply(`Transcript of the voice message:\n${transcript}`, {
+		ctx.reply(`${transcript}`, {
 			reply_to_message_id: ctx.message.message_id
 		}).catch((err) => {
-			ctx.reply(`Transcript of the voice message:\n${transcript}`)
+			ctx.reply(`${transcript}`)
 		})
 	});
 	
