@@ -1,5 +1,5 @@
 # tldl
- too long; didn't listen, generate voice message captions with whisper
+ too long; didn't listen, generate voice message captions with whisper in telegram and discord 
 
 ## Installation
 
