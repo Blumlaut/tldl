@@ -111,7 +111,7 @@ async function TGVoiceHandler(file_id) {
 
 async function QueryWhisper(fileName) {
 	// execute ./whisper-faster-xxl in "Whisper-Faster-XXL" folder
-	const result = await execa`./Whisper-Faster-XXL/whisper-faster-xxl ${fileName} --output_format text --output_dir /tmp/tldl/ --without_timestamps true --word_timestamps false --model ${process.env.WHISPER_MODEL || 'medium'}`
+	await execa`./Whisper-Faster-XXL/whisper-faster-xxl ${fileName} ${process.env.DEVICE !== 'auto' ? `--device ${process.env.DEVICE}` : ''} --output_format text --output_dir /tmp/tldl/ --without_timestamps true --word_timestamps false --model ${process.env.WHISPER_MODEL || 'medium'}`
 
 	let strippedFileName = path.basename(fileName, path.extname(fileName));
 	const filePath = path.join('/tmp/tldl/', `${strippedFileName}.text`);
