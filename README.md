@@ -15,6 +15,11 @@ The Bot will create an audio transcript for every voice message it sees, this ca
 
 Voice messages are temporarily downloaded into `/tmp/tldl/`, this is also where transcripts are stored until they are read by the bot, the files are subsequently deleted.
 
+![image](https://github.com/user-attachments/assets/0f34c103-d643-45f3-aaa1-51cb1a785ba0)
+
+![image](https://github.com/user-attachments/assets/2fb280a4-ea64-46e6-8a9b-4b39737a1663)
+
+
 ## License
 
 see [LICENSE](LICENSE)
