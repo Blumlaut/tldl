@@ -115,7 +115,7 @@ async function oggToPcmBuffer(inputPath) {
 }
 
 
-/** Minimal Wyoming client for STT (transcribe → audio-start/chunk/stop → transcript) */
+/** Minimal Wyoming client for STT */
 async function QueryWyoming(oggPath) {
   const pcm = await oggToPcmBuffer(oggPath);
   const RATE = 16000, WIDTH = 2, CHANNELS = 1;
@@ -132,8 +132,8 @@ async function QueryWyoming(oggPath) {
     if (payload?.length) socket.write(payload);
   };
 
-  // Start request
-  writeEvent({ type: 'transcribe', data: {} }); // let server choose model/lang
+  // Start request (send model/lang if set)
+  writeEvent({ type: 'transcribe', data: { name: WYO_MODEL, language: WYO_LANGUAGE } });
   writeEvent({ type: 'audio-start', data: { rate: RATE, width: WIDTH, channels: CHANNELS } });
 
   const CHUNK = 8192;
@@ -157,17 +157,13 @@ async function QueryWyoming(oggPath) {
   };
 
   const timer = setTimeout(() => {
-    // timeout: return best effort
     try { socket.destroy(); } catch {}
-  }, 60_000); // 60s
+  }, 60_000); // 60s fallback
 
   const getTextFrom = (header, payload) => {
-    // 1) header.data.text
     if (header?.data?.text) return { text: header.data.text, final: !!header.data.final };
-    // 2) payload is UTF-8 text
     const asStr = payload?.toString?.('utf8') ?? '';
     if (!asStr) return { text: '', final: false };
-    // maybe JSON payload {text, final}
     try {
       const j = JSON.parse(asStr);
       if (typeof j?.text === 'string') return { text: j.text, final: !!j.final };
@@ -192,8 +188,6 @@ async function QueryWyoming(oggPath) {
         const need = header?.payload_length ?? 0;
         if (need > 0) {
           if (buf.length < need) {
-            // wait for full payload
-            // put header back
             buf = Buffer.concat([Buffer.from(line + '\n', 'utf8'), buf]);
             break;
           }
@@ -201,15 +195,29 @@ async function QueryWyoming(oggPath) {
           buf = buf.subarray(need);
 
           if (header.type === 'transcript') {
-            const { text, final } = getTextFrom(header, payload);
+            const { text } = getTextFrom(header, payload);
             if (text) lastText = text;
-            if (final) return resolve(finish(text));
+            return resolve(finish(lastText));
+          }
+          if (header.type === 'transcript-chunk') {
+            const { text } = getTextFrom(header, payload);
+            if (text) lastText = lastText ? `${lastText} ${text}` : text;
+          }
+          if (header.type === 'transcript-stop') {
+            return resolve(finish(lastText));
           }
         } else {
           if (header.type === 'transcript') {
-            const { text, final } = getTextFrom(header, null);
+            const { text } = getTextFrom(header, null);
             if (text) lastText = text;
-            if (final) return resolve(finish(text));
+            return resolve(finish(lastText));
+          }
+          if (header.type === 'transcript-chunk') {
+            const { text } = getTextFrom(header, null);
+            if (text) lastText = lastText ? `${lastText} ${text}` : text;
+          }
+          if (header.type === 'transcript-stop') {
+            return resolve(finish(lastText));
           }
         }
 
@@ -224,6 +232,7 @@ async function QueryWyoming(oggPath) {
     socket.on('error', (e) => reject(e));
   });
 }
+
 
 process.once('SIGINT', () => Telegram?.stop('SIGINT'));
 process.once('SIGTERM', () => Telegram?.stop('SIGTERM'));
