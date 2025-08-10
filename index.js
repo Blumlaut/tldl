@@ -116,10 +116,16 @@ async function oggToPcmBuffer(inputPath) {
 
 
 /** Minimal Wyoming client for STT */
-/** Minimal Wyoming client for STT */
+/** Minimal Wyoming client for STT — with debug logging */
 async function QueryWyoming(oggPath) {
+  const DEBUG = process.env.DEBUG_WYOMING === '1';
+  const DUMP  = process.env.DEBUG_WYOMING_DUMP === '1';
+  const dlog = (...args) => { if (DEBUG) console.log('[wyoming]', ...args); };
+
   const pcm = await oggToPcmBuffer(oggPath);
   const RATE = 16000, WIDTH = 2, CHANNELS = 1;
+
+  dlog('connect', { host: WYO_HOST, port: WYO_PORT, pcmBytes: pcm.length });
 
   const socket = await new Promise((resolve, reject) => {
     const s = net.createConnection({ host: WYO_HOST, port: WYO_PORT }, () => resolve(s));
@@ -129,37 +135,45 @@ async function QueryWyoming(oggPath) {
   const writeEvent = (hdr, payload) => {
     const header = { ...hdr };
     if (payload?.length) header.payload_length = payload.length;
+    dlog('>>', header.type, header, payload ? `(${payload.length} bytes)` : '');
     socket.write(JSON.stringify(header) + '\n');
     if (payload?.length) socket.write(payload);
   };
 
-  // Start request (include model/lang if set)
+  // Start request (model/lang if provided)
   writeEvent({ type: 'transcribe', data: { name: WYO_MODEL, language: WYO_LANGUAGE } });
   writeEvent({ type: 'audio-start', data: { rate: RATE, width: WIDTH, channels: CHANNELS } });
 
   const CHUNK = 8192;
   for (let o = 0; o < pcm.length; o += CHUNK) {
-    writeEvent({ type: 'audio-chunk', data: { rate: RATE, width: WIDTH, channels: CHANNELS } },
-      pcm.subarray(o, Math.min(o + CHUNK, pcm.length)));
+    const slice = pcm.subarray(o, Math.min(o + CHUNK, pcm.length));
+    writeEvent({ type: 'audio-chunk', data: { rate: RATE, width: WIDTH, channels: CHANNELS } }, slice);
   }
   writeEvent({ type: 'audio-stop' });
 
   let buf = Buffer.alloc(0);
   let lastText = '';
   let resolved = false;
-  let streamingMode = false; // detect transcript-start
-  const finish = (text) => {
+  let streamingMode = false; // becomes true after transcript-start
+  const dumpPath = `/tmp/wyoming-dump-${Date.now()}.bin`;
+  const dumpStream = DUMP ? fs.createWriteStream(dumpPath) : null;
+  if (dumpStream) dlog('dumping raw bytes to', dumpPath);
+
+  const finish = (text, reason) => {
     if (!resolved) {
       resolved = true;
       try { socket.end(); } catch {}
       clearTimeout(timer);
-      return text?.trim() || lastText.trim() || '';
+      dumpStream?.end();
+      dlog('finish', { reason, textLen: (text || lastText).trim().length, streamingMode });
+      return (text || lastText || '').trim();
     }
   };
 
   const timer = setTimeout(() => {
+    dlog('timeout 60s — best effort return');
     try { socket.destroy(); } catch {}
-  }, 60_000); // fallback
+  }, 60_000);
 
   const getTextFrom = (header, payload) => {
     if (header?.data?.text) return { text: header.data.text, final: !!header.data.final };
@@ -168,79 +182,117 @@ async function QueryWyoming(oggPath) {
     try {
       const j = JSON.parse(asStr);
       if (typeof j?.text === 'string') return { text: j.text, final: !!j.final };
-    } catch {}
+    } catch {} // payload is plain utf8 text
     return { text: asStr, final: false };
   };
 
   return await new Promise((resolve, reject) => {
     socket.on('data', (chunk) => {
+      dumpStream?.write(chunk);
+      dlog('<< chunk', chunk.length, 'bytes');
       buf = Buffer.concat([buf, chunk]);
+
       while (true) {
-        const nl = buf.indexOf(0x0a);
+        const nl = buf.indexOf(0x0a); // '\n'
         if (nl < 0) break;
 
-        const line = buf.subarray(0, nl).toString('utf8').trim();
+        const rawLine = buf.subarray(0, nl);
+        const line = rawLine.toString('utf8').trim();
         buf = buf.subarray(nl + 1);
         if (!line) continue;
 
         let header;
-        try { header = JSON.parse(line); } catch { continue; }
+        try {
+          header = JSON.parse(line);
+        } catch (e) {
+          dlog('!! bad header JSON', { linePreview: line.slice(0, 200) });
+          continue;
+        }
 
         const need = header?.payload_length ?? 0;
+        dlog('<< header', header.type, { need, has: buf.length, header });
+
         if (need > 0) {
           if (buf.length < need) {
+            dlog('... waiting payload', { need, have: buf.length });
+            // put header back and wait for more bytes
             buf = Buffer.concat([Buffer.from(line + '\n', 'utf8'), buf]);
             break;
           }
           const payload = buf.subarray(0, need);
           buf = buf.subarray(need);
 
-          // Handle payload types
           if (header.type === 'transcript-start') {
             streamingMode = true;
-          }
-          if (header.type === 'transcript-chunk') {
+            dlog('state: streamingMode=true');
+          } else if (header.type === 'transcript-chunk') {
             const { text } = getTextFrom(header, payload);
-            if (text) lastText += (lastText ? ' ' : '') + text;
-          }
-          if (header.type === 'transcript-stop') {
-            return resolve(finish(lastText));
-          }
-          if (header.type === 'transcript' && !streamingMode) {
+            if (text) {
+              lastText += (lastText ? ' ' : '') + text;
+              dlog('chunk+', { addLen: text.length, totalLen: lastText.length, preview: text.slice(0, 120) });
+            }
+          } else if (header.type === 'transcript-stop') {
+            dlog('stop (payload)', { totalLen: lastText.length });
+            return resolve(finish(lastText, 'transcript-stop'));
+          } else if (header.type === 'transcript') {
             const { text } = getTextFrom(header, payload);
-            if (text) lastText = text;
-            return resolve(finish(lastText));
+            if (streamingMode) {
+              // Some servers send a final 'transcript' after chunks; treat as final text.
+              if (text) lastText = text;
+              dlog('final transcript (streaming)', { totalLen: lastText.length });
+              return resolve(finish(lastText, 'final transcript (streaming)'));
+            } else {
+              if (text) lastText = text;
+              dlog('final transcript (non-streaming)', { totalLen: lastText.length });
+              return resolve(finish(lastText, 'final transcript (non-streaming)'));
+            }
+          } else if (header.type === 'error') {
+            dlog('server error', header.data);
+            return reject(new Error(header.data?.message || 'Wyoming error'));
           }
         } else {
-          // Handle no-payload messages
+          // No payload
           if (header.type === 'transcript-start') {
             streamingMode = true;
-          }
-          if (header.type === 'transcript-chunk') {
+            dlog('state: streamingMode=true (no payload)');
+          } else if (header.type === 'transcript-chunk') {
             const { text } = getTextFrom(header, null);
-            if (text) lastText += (lastText ? ' ' : '') + text;
-          }
-          if (header.type === 'transcript-stop') {
-            return resolve(finish(lastText));
-          }
-          if (header.type === 'transcript' && !streamingMode) {
+            if (text) {
+              lastText += (lastText ? ' ' : '') + text;
+              dlog('chunk+ (no payload)', { addLen: text.length, totalLen: lastText.length, preview: text.slice(0, 120) });
+            }
+          } else if (header.type === 'transcript-stop') {
+            dlog('stop (no payload)', { totalLen: lastText.length });
+            return resolve(finish(lastText, 'transcript-stop'));
+          } else if (header.type === 'transcript') {
             const { text } = getTextFrom(header, null);
-            if (text) lastText = text;
-            return resolve(finish(lastText));
+            if (streamingMode) {
+              if (text) lastText = text;
+              dlog('final transcript (streaming, no payload)', { totalLen: lastText.length });
+              return resolve(finish(lastText, 'final transcript (streaming, no payload)'));
+            } else {
+              if (text) lastText = text;
+              dlog('final transcript (non-streaming, no payload)', { totalLen: lastText.length });
+              return resolve(finish(lastText, 'final transcript (non-streaming, no payload)'));
+            }
+          } else if (header.type === 'error') {
+            dlog('server error (no payload)', header.data);
+            return reject(new Error(header.data?.message || 'Wyoming error'));
           }
-        }
-
-        if (header.type === 'error') {
-          return reject(new Error(header.data?.message || 'Wyoming error'));
         }
       }
     });
 
-    socket.on('end', () => resolve(finish('')));
-    socket.on('close', () => resolve(finish('')));
-    socket.on('error', (e) => reject(e));
+    socket.on('end',   () => resolve(finish('', 'socket end')));
+    socket.on('close', () => resolve(finish('', 'socket close')));
+    socket.on('error', (e) => {
+      dlog('socket error', e?.message || e);
+      dumpStream?.end();
+      return reject(e);
+    });
   });
 }
+
 
 
 
