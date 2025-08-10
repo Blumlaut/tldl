@@ -116,6 +116,7 @@ async function oggToPcmBuffer(inputPath) {
 
 
 /** Minimal Wyoming client for STT */
+/** Minimal Wyoming client for STT */
 async function QueryWyoming(oggPath) {
   const pcm = await oggToPcmBuffer(oggPath);
   const RATE = 16000, WIDTH = 2, CHANNELS = 1;
@@ -132,7 +133,7 @@ async function QueryWyoming(oggPath) {
     if (payload?.length) socket.write(payload);
   };
 
-  // Start request (send model/lang if set)
+  // Start request (include model/lang if set)
   writeEvent({ type: 'transcribe', data: { name: WYO_MODEL, language: WYO_LANGUAGE } });
   writeEvent({ type: 'audio-start', data: { rate: RATE, width: WIDTH, channels: CHANNELS } });
 
@@ -146,19 +147,19 @@ async function QueryWyoming(oggPath) {
   let buf = Buffer.alloc(0);
   let lastText = '';
   let resolved = false;
-
+  let streamingMode = false; // detect transcript-start
   const finish = (text) => {
     if (!resolved) {
       resolved = true;
       try { socket.end(); } catch {}
       clearTimeout(timer);
-      return text || lastText || '';
+      return text?.trim() || lastText.trim() || '';
     }
   };
 
   const timer = setTimeout(() => {
     try { socket.destroy(); } catch {}
-  }, 60_000); // 60s fallback
+  }, 60_000); // fallback
 
   const getTextFrom = (header, payload) => {
     if (header?.data?.text) return { text: header.data.text, final: !!header.data.final };
@@ -194,29 +195,37 @@ async function QueryWyoming(oggPath) {
           const payload = buf.subarray(0, need);
           buf = buf.subarray(need);
 
-          if (header.type === 'transcript') {
-            const { text } = getTextFrom(header, payload);
-            if (text) lastText = text;
-            return resolve(finish(lastText));
+          // Handle payload types
+          if (header.type === 'transcript-start') {
+            streamingMode = true;
           }
           if (header.type === 'transcript-chunk') {
             const { text } = getTextFrom(header, payload);
-            if (text) lastText = lastText ? `${lastText} ${text}` : text;
+            if (text) lastText += (lastText ? ' ' : '') + text;
           }
           if (header.type === 'transcript-stop') {
+            return resolve(finish(lastText));
+          }
+          if (header.type === 'transcript' && !streamingMode) {
+            const { text } = getTextFrom(header, payload);
+            if (text) lastText = text;
             return resolve(finish(lastText));
           }
         } else {
-          if (header.type === 'transcript') {
-            const { text } = getTextFrom(header, null);
-            if (text) lastText = text;
-            return resolve(finish(lastText));
+          // Handle no-payload messages
+          if (header.type === 'transcript-start') {
+            streamingMode = true;
           }
           if (header.type === 'transcript-chunk') {
             const { text } = getTextFrom(header, null);
-            if (text) lastText = lastText ? `${lastText} ${text}` : text;
+            if (text) lastText += (lastText ? ' ' : '') + text;
           }
           if (header.type === 'transcript-stop') {
+            return resolve(finish(lastText));
+          }
+          if (header.type === 'transcript' && !streamingMode) {
+            const { text } = getTextFrom(header, null);
+            if (text) lastText = text;
             return resolve(finish(lastText));
           }
         }
@@ -232,6 +241,7 @@ async function QueryWyoming(oggPath) {
     socket.on('error', (e) => reject(e));
   });
 }
+
 
 
 process.once('SIGINT', () => Telegram?.stop('SIGINT'));
