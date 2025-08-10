@@ -118,8 +118,8 @@ async function oggToPcmBuffer(inputPath) {
 /** Minimal Wyoming client for STT */
 /** Minimal Wyoming client for STT — with debug logging */
 async function QueryWyoming(oggPath) {
-  const DEBUG = process.env.DEBUG_WYOMING === '1';
-  const DUMP  = process.env.DEBUG_WYOMING_DUMP === '1';
+  const DEBUG = process.env.DEBUG_WYOMING == 1;
+  const DUMP  = process.env.DEBUG_WYOMING_DUMP == 1;
   const dlog = (...args) => { if (DEBUG) console.log('[wyoming]', ...args); };
 
   const pcm = await oggToPcmBuffer(oggPath);
