@@ -108,16 +108,14 @@ async function TGVoiceHandler(file_id) {
 
 /** Transcode OGG → raw PCM s16le 16kHz mono (Buffer) using ffmpeg */
 async function oggToPcmBuffer(inputPath) {
-  const { stdout } = await execa('ffmpeg', [
-    '-y',
-    '-i', inputPath,
-    '-ac', '1',
-    '-ar', '16000',
-    '-f', 's16le',
-    'pipe:1'
-  ], { encoding: null });
+  const { stdout } = await execa(
+    'ffmpeg',
+    ['-y', '-i', inputPath, '-ac', '1', '-ar', '16000', '-f', 's16le', 'pipe:1'],
+    { encoding: 'buffer', stdout: 'pipe' } // <-- fix
+  );
   return stdout; // Buffer
 }
+
 
 /** Minimal Wyoming client for STT (transcribe → audio-start/chunk/stop → transcript) */
 async function QueryWyoming(oggPath) {
