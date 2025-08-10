@@ -80,9 +80,7 @@ if (process.env.TELEGRAM_TOKEN) {
   Telegram.on(message('voice'), async (ctx) => {
     ctx.sendChatAction('typing');
     const transcript = await TGVoiceHandler(ctx.message.voice.file_id);
-    ctx.reply(`${transcript}`, { reply_to_message_id: ctx.message.message_id }).catch(() =>
-      ctx.reply(`${transcript}`)
-    );
+    await ctx.reply(transcript || '(no text detected)', { reply_to_message_id: ctx.message.message_id });
   });
   Telegram.launch();
 } else {
@@ -127,84 +125,104 @@ async function QueryWyoming(oggPath) {
     s.on('error', reject);
   });
 
-  const writeEvent = (headerObj, payloadBuf) => {
-    const hdr = { ...headerObj };
-    if (payloadBuf?.length) hdr.payload_length = payloadBuf.length;
-    socket.write(JSON.stringify(hdr) + '\n');
-    if (payloadBuf?.length) socket.write(payloadBuf);
+  const writeEvent = (hdr, payload) => {
+    const header = { ...hdr };
+    if (payload?.length) header.payload_length = payload.length;
+    socket.write(JSON.stringify(header) + '\n');
+    if (payload?.length) socket.write(payload);
   };
 
-  // 1) transcribe (optionally pass model/language)
-  writeEvent({
-    type: 'transcribe',
-    data: {
-      ...(WYO_MODEL ? { name: WYO_MODEL } : {}),
-      ...(WYO_LANGUAGE ? { language: WYO_LANGUAGE } : {})
-    }
-  });
+  // Start request
+  writeEvent({ type: 'transcribe', data: {} }); // let server choose model/lang
+  writeEvent({ type: 'audio-start', data: { rate: RATE, width: WIDTH, channels: CHANNELS } });
 
-  // 2) audio-start
-  writeEvent({
-    type: 'audio-start',
-    data: { rate: RATE, width: WIDTH, channels: CHANNELS }
-  });
-
-  // 3) audio-chunk(s)
   const CHUNK = 8192;
   for (let o = 0; o < pcm.length; o += CHUNK) {
-    const chunk = pcm.subarray(o, Math.min(o + CHUNK, pcm.length));
-    writeEvent({
-      type: 'audio-chunk',
-      data: { rate: RATE, width: WIDTH, channels: CHANNELS }
-    }, chunk);
+    writeEvent({ type: 'audio-chunk', data: { rate: RATE, width: WIDTH, channels: CHANNELS } },
+      pcm.subarray(o, Math.min(o + CHUNK, pcm.length)));
   }
-
-  // 4) audio-stop
   writeEvent({ type: 'audio-stop' });
 
-  // 5) wait for transcript
-  let leftover = Buffer.alloc(0);
-  const transcript = await new Promise((resolve, reject) => {
-    socket.on('data', (buf) => {
-      leftover = Buffer.concat([leftover, buf]);
-      // read line by line (JSON header per line)
+  let buf = Buffer.alloc(0);
+  let lastText = '';
+  let resolved = false;
+
+  const finish = (text) => {
+    if (!resolved) {
+      resolved = true;
+      try { socket.end(); } catch {}
+      clearTimeout(timer);
+      return text || lastText || '';
+    }
+  };
+
+  const timer = setTimeout(() => {
+    // timeout: return best effort
+    try { socket.destroy(); } catch {}
+  }, 60_000); // 60s
+
+  const getTextFrom = (header, payload) => {
+    // 1) header.data.text
+    if (header?.data?.text) return { text: header.data.text, final: !!header.data.final };
+    // 2) payload is UTF-8 text
+    const asStr = payload?.toString?.('utf8') ?? '';
+    if (!asStr) return { text: '', final: false };
+    // maybe JSON payload {text, final}
+    try {
+      const j = JSON.parse(asStr);
+      if (typeof j?.text === 'string') return { text: j.text, final: !!j.final };
+    } catch {}
+    return { text: asStr, final: false };
+  };
+
+  return await new Promise((resolve, reject) => {
+    socket.on('data', (chunk) => {
+      buf = Buffer.concat([buf, chunk]);
       while (true) {
-        const idx = leftover.indexOf(0x0a); // '\n'
-        if (idx < 0) break;
-        const line = leftover.subarray(0, idx).toString('utf8').trim();
-        leftover = leftover.subarray(idx + 1);
+        const nl = buf.indexOf(0x0a);
+        if (nl < 0) break;
+
+        const line = buf.subarray(0, nl).toString('utf8').trim();
+        buf = buf.subarray(nl + 1);
         if (!line) continue;
+
         let header;
         try { header = JSON.parse(line); } catch { continue; }
 
-        const payloadLen = header?.payload_length || 0;
-        if (payloadLen > 0) {
-          if (leftover.length < payloadLen) { // wait for more
-            // put line back and wait
-            leftover = Buffer.concat([Buffer.from(line + '\n'), leftover]);
-            return;
+        const need = header?.payload_length ?? 0;
+        if (need > 0) {
+          if (buf.length < need) {
+            // wait for full payload
+            // put header back
+            buf = Buffer.concat([Buffer.from(line + '\n', 'utf8'), buf]);
+            break;
           }
-          const payload = leftover.subarray(0, payloadLen);
-          leftover = leftover.subarray(payloadLen);
+          const payload = buf.subarray(0, need);
+          buf = buf.subarray(need);
 
           if (header.type === 'transcript') {
-            // payload is UTF-8 text
-            resolve(payload.toString('utf8'));
-            socket.end();
+            const { text, final } = getTextFrom(header, payload);
+            if (text) lastText = text;
+            if (final) return resolve(finish(text));
           }
         } else {
-          if (header.type === 'transcript' && header.data?.text) {
-            resolve(header.data.text);
-            socket.end();
+          if (header.type === 'transcript') {
+            const { text, final } = getTextFrom(header, null);
+            if (text) lastText = text;
+            if (final) return resolve(finish(text));
           }
+        }
+
+        if (header.type === 'error') {
+          return reject(new Error(header.data?.message || 'Wyoming error'));
         }
       }
     });
-    socket.on('error', reject);
-    socket.on('end', () => reject(new Error('Wyoming closed before transcript')));
-  });
 
-  return transcript;
+    socket.on('end', () => resolve(finish('')));
+    socket.on('close', () => resolve(finish('')));
+    socket.on('error', (e) => reject(e));
+  });
 }
 
 process.once('SIGINT', () => Telegram?.stop('SIGINT'));
