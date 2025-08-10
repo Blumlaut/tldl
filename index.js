@@ -117,7 +117,7 @@ async function oggToPcmBuffer(inputPath) {
 
 /** Minimal Wyoming client for STT */
 async function QueryWyoming(oggPath) {
-  const DEBUG = true;
+  const DEBUG = process.env.DEBUG_WYOMING == 1;
   const DUMP  = process.env.DEBUG_WYOMING_DUMP == 1;
   const dlog = (...args) => { if (DEBUG) console.log('[wyoming]', ...args); };
 
@@ -153,7 +153,7 @@ async function QueryWyoming(oggPath) {
   let buf = Buffer.alloc(0);
   let lastText = '';
   let resolved = false;
-  let streamingMode = false; // becomes true after transcript-start
+  let streamingMode = false;
   const dumpPath = `/tmp/wyoming-dump-${Date.now()}.bin`;
   const dumpStream = DUMP ? fs.createWriteStream(dumpPath) : null;
   if (dumpStream) dlog('dumping raw bytes to', dumpPath);
@@ -170,7 +170,7 @@ async function QueryWyoming(oggPath) {
   };
 
   const timer = setTimeout(() => {
-    dlog('timeout 60s — best effort return');
+    dlog('timeout 60s \u2014 best effort return');
     try { socket.destroy(); } catch {}
   }, 60_000);
 
@@ -181,7 +181,7 @@ async function QueryWyoming(oggPath) {
     try {
       const j = JSON.parse(asStr);
       if (typeof j?.text === 'string') return { text: j.text, final: !!j.final };
-    } catch {} // payload is plain utf8 text
+    } catch {}
     return { text: asStr, final: false };
   };
 
@@ -203,12 +203,19 @@ async function QueryWyoming(oggPath) {
         let header;
         try {
           header = JSON.parse(line);
-        } catch (e) {
+        } catch {
           dlog('!! bad header JSON', { linePreview: line.slice(0, 200) });
           continue;
         }
 
-        const need = header?.payload_length ?? 0;
+        // Accept multiple header keys for payload sizing (some servers use data_length)
+        const need =
+          header?.payload_length ??
+          header?.data_length ??
+          header?.length ??
+          header?.payloadLen ??
+          0;
+
         dlog('<< header', header.type, { need, has: buf.length, header });
 
         if (need > 0) {
@@ -236,7 +243,6 @@ async function QueryWyoming(oggPath) {
           } else if (header.type === 'transcript') {
             const { text } = getTextFrom(header, payload);
             if (streamingMode) {
-              // Some servers send a final 'transcript' after chunks; treat as final text.
               if (text) lastText = text;
               dlog('final transcript (streaming)', { totalLen: lastText.length });
               return resolve(finish(lastText, 'final transcript (streaming)'));
@@ -250,7 +256,7 @@ async function QueryWyoming(oggPath) {
             return reject(new Error(header.data?.message || 'Wyoming error'));
           }
         } else {
-          // No payload
+          // No payload bytes declared
           if (header.type === 'transcript-start') {
             streamingMode = true;
             dlog('state: streamingMode=true (no payload)');
